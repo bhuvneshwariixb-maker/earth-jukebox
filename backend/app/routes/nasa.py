@@ -1,4 +1,9 @@
 
+from app.services.vibration_service import get_vibration_pattern
+from io import BytesIO
+from fastapi.responses import StreamingResponse
+
+from app.services.sound_engine import generate_wav
 import requests
 from datetime import date
 from fastapi import APIRouter, HTTPException, Query
@@ -85,3 +90,63 @@ def sonify_climate(
             status_code=502,
             detail="Unable to retrieve NASA data."
         )
+
+@router.get("/sonify/audio")
+def generate_climate_audio(
+    latitude: float = Query(..., ge=-90, le=90),
+    longitude: float = Query(..., ge=-180, le=180),
+    start_date: date = Query(...),
+    end_date: date = Query(...)
+):
+    try:
+        climate_data = get_climate_data(
+            latitude=latitude,
+            longitude=longitude,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        sound_data = convert_climate_to_sound(
+            climate_data["records"]
+        )
+
+        audio_bytes = generate_wav(
+            sound_data["sound_records"]
+        )
+
+        return StreamingResponse(
+            BytesIO(audio_bytes),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition":
+                    'attachment; filename="earth_jukebox.wav"'
+            }
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
+
+    except requests.RequestException:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to retrieve NASA data."
+        )
+@router.get("/haptics")
+def get_haptics(
+    event_type: str = Query(...)
+):
+    try:
+        return {
+            "accessibility": "haptic_feedback",
+            "haptics": get_vibration_pattern(event_type)
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
+
