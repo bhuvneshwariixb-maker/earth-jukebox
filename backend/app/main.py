@@ -1,14 +1,15 @@
 
 from fastapi import FastAPI
-from app.routes import nasa
+from app.routes import nasa, gemini
 
 app = FastAPI(
     title="Earth Jukebox API",
-    description="NASA Earth Science Data and Sonification Backend",
-    version="1.0.0"
+    description="NASA Earth Science Data, Sonification and Gemini Voice Assistant",
+    version="1.1.0"
 )
 
 app.include_router(nasa.router)
+app.include_router(gemini.router)
 
 
 @app.get("/")
@@ -26,3 +27,4 @@ def health():
         "status": "healthy",
         "app": "Earth Jukebox"
     }
+

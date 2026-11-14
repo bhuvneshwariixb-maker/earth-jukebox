@@ -1,0 +1,6 @@
+{
+  "operationId": "654b0992-ead4-8602-ac9c-064e631db48f",
+  "targetTemplate": "ReactNextJsWithPayloadV1",
+  "startingRef": "refs/heads/main",
+  "startingSha": "62cd54b02478b9acea550868078097f71af949a4"
+}
