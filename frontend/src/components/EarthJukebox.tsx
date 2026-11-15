@@ -1,10 +1,15 @@
 'use client'
-
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { loginUser, logoutUser, registerUser } from '@/app/(frontend)/actions'
 import type { AppUser } from '@/lib/app-auth'
+import {
+  getClimateAudio,
+  getClimateData,
+  getHaptics,
+  type ClimateResponse,
+} from '@/lib/earth-jukebox-api'
 import { useGeminiLive } from '@/lib/useGeminiLive'
 
 type Screen =
@@ -995,7 +1000,108 @@ const audio = new Audio(
     setPreviewing(null)
   }
 }
-  return (
+
+  const [climate, setClimate] = useState<ClimateResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadClimate() {
+      try {
+        setLoading(true)
+        setError(null)
+
+        const today = new Date()
+        const end = new Date(today)
+        end.setDate(today.getDate() - 2)
+
+        const start = new Date(end)
+        start.setDate(end.getDate() - 6)
+
+        const formatDate = (date: Date) => {
+          const year = date.getFullYear()
+          const month = String(date.getMonth() + 1).padStart(2, '0')
+          const day = String(date.getDate()).padStart(2, '0')
+          return `${year}-${month}-${day}`
+        }
+
+        const result = await getClimateData({
+          latitude: 28.6139,
+          longitude: 77.209,
+          startDate: formatDate(start),
+          endDate: formatDate(end),
+        })
+
+        if (!cancelled) setClimate(result)
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Unable to load NASA data.',
+          )
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    loadClimate()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const validRecords =
+    climate?.records.filter(
+      (record) =>
+        record.temperature_celsius !== null &&
+        record.rainfall_mm !== null,
+    ) ?? []
+
+  const latestRecord = validRecords[validRecords.length - 1]
+
+  const temperatureValue =
+    latestRecord?.temperature_celsius != null
+      ? `${latestRecord.temperature_celsius.toFixed(1)}°C`
+      : '—'
+
+  const rainfallValue =
+    latestRecord?.rainfall_mm != null
+      ? `${latestRecord.rainfall_mm.toFixed(1)} mm`
+      : '—'
+
+  const displayDatasets = datasets.map((dataset) => {
+    if (dataset.id === 'temperature') {
+      return {
+        ...dataset,
+        value: loading ? 'Loading...' : error ? 'Unavailable' : temperatureValue,
+        description: 'Latest NASA POWER daily temperature reading',
+        live: true,
+      }
+    }
+
+    if (dataset.id === 'rain') {
+      return {
+        ...dataset,
+        value: loading ? 'Loading...' : error ? 'Unavailable' : rainfallValue,
+        description: 'Latest NASA POWER daily rainfall reading',
+        live: true,
+      }
+    }
+
+    return {
+      ...dataset,
+      value: 'Coming soon',
+      description: 'This dataset is not connected yet.',
+      live: false,
+    }
+  })
+
+return (
     <main className="content" id="main-content">
       <div className="page-heading">
         <div>
@@ -1007,6 +1113,7 @@ const audio = new Audio(
           Ask by voice
         </Button>
       </div>
+
       {showInstall && (
         <div className="install-prompt" role="region" aria-label="Install Earth Jukebox">
           <span className="install-icon">
@@ -1026,13 +1133,26 @@ const audio = new Audio(
           </button>
         </div>
       )}
+
       <section aria-labelledby="datasets-title">
         <div className="section-title">
           <h2 id="datasets-title">Explore Earth data</h2>
-          <span>Updated today</span>
+          <span>
+            {loading ? 'Fetching NASA data...' : error ? 'Data unavailable' : 'NASA POWER · Delhi'}
+          </span>
         </div>
+
+        {error && (
+          <div role="alert" className="install-prompt">
+            <p>Could not load climate data: {error}</p>
+            <Button onClick={() => window.location.reload()}>
+              Retry
+            </Button>
+          </div>
+        )}
+
         <div className="dataset-grid">
-          {datasets.map((dataset) => (
+          {displayDatasets.map((dataset) => (
             <article className={`dataset-card accent-${dataset.color}`} key={dataset.id}>
               <div className="dataset-top">
                 <span className="dataset-icon">
@@ -1040,11 +1160,13 @@ const audio = new Audio(
                 </span>
                 <span className="data-value">
                   {dataset.value}
-                  <small> since 1993</small>
+                  {dataset.live && <small> latest reading</small>}
                 </span>
               </div>
+
               <h3>{dataset.name}</h3>
               <p>{dataset.description}</p>
+
               <div className="dataset-actions">
                 {dataset.id === 'temperature' || dataset.id === 'rain' ? (
                   <Button
@@ -1060,28 +1182,26 @@ const audio = new Audio(
                     Real data coming soon
                   </span>
                 )}
-                <button
+<button
                   className="round-arrow"
                   onClick={() => setScreen('player')}
                   aria-label={`Open ${dataset.name} player`}
+                  disabled={!dataset.live || loading || !!error || !latestRecord}
                 >
                   <Icon name="arrow" />
                 </button>
               </div>
-              {previewing === dataset.id && (
-                <div className="card-wave" role="status">
-                  <span>Preview playing</span>
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                </div>
-              )}
             </article>
           ))}
         </div>
+
+        {latestRecord && (
+          <p className="eyebrow">
+            Latest available reading: {latestRecord.date}
+          </p>
+        )}
       </section>
+
       <section className="featured">
         <div className="featured-image">
           <Image
@@ -1092,15 +1212,16 @@ const audio = new Audio(
           />
           <span>Featured story</span>
         </div>
+
         <div className="featured-copy">
-          <p className="eyebrow">Before & after Â· 2001â€“2024</p>
+          <p className="eyebrow">Earth stories</p>
           <h2>Hear the Amazon change</h2>
           <p>
-            Listen as forest cover shifts across two decades. Birdsong fades as measured tree loss
-            increases.
+            Explore how Earth observation data can be transformed into sound.
+            Forest change data integration is coming soon.
           </p>
           <Button onClick={() => setScreen('player')} icon="play">
-            Experience the story
+            Explore Earth sounds
           </Button>
         </div>
       </section>
@@ -1108,173 +1229,446 @@ const audio = new Audio(
   )
 }
 
+
+
 function Player({ goVoice }: { goVoice: () => void }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
   const [playing, setPlaying] = useState(false)
-  const [before, setBefore] = useState(false)
   const [vibration, setVibration] = useState(true)
-  const [position, setPosition] = useState(72)
-  const [speed, setSpeed] = useState('1Ã—')
-  const [error, setError] = useState(false)
+  const [position, setPosition] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [speed, setSpeed] = useState('1')
+  const [climate, setClimate] = useState<ClimateResponse | null>(null)
+  const [audioUrl, setAudioUrl] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [hapticMessage, setHapticMessage] = useState('')
+
+  const [retryKey, setRetryKey] = useState(0)
 
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (
-        event.code === 'Space' &&
-        !['INPUT', 'BUTTON', 'SELECT'].includes((event.target as HTMLElement).tagName)
-      ) {
-        event.preventDefault()
-        setPlaying((value) => !value)
+    let cancelled = false
+    let createdUrl: string | null = null
+
+    async function loadPlayerData() {
+      try {
+        setLoading(true)
+        setError(null)
+        setPlaying(false)
+
+        const today = new Date()
+        const end = new Date(today)
+        end.setDate(today.getDate() - 2)
+
+        const start = new Date(end)
+        start.setDate(end.getDate() - 6)
+
+        const formatDate = (date: Date) => {
+          const year = date.getFullYear()
+          const month = String(date.getMonth() + 1).padStart(2, '0')
+          const day = String(date.getDate()).padStart(2, '0')
+          return `${year}-${month}-${day}`
+        }
+
+        const params = {
+          latitude: 28.6139,
+          longitude: 77.209,
+          startDate: formatDate(start),
+          endDate: formatDate(end),
+        }
+
+        const [climateResult, audioBlob] = await Promise.all([
+          getClimateData(params),
+          getClimateAudio(params),
+        ])
+
+        if (cancelled) return
+
+        createdUrl = URL.createObjectURL(audioBlob)
+
+        setClimate(climateResult)
+        setAudioUrl(createdUrl)
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'Unable to load Earth data or generate audio.',
+          )
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      if (event.key === 'Escape') setPlaying(false)
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+
+    loadPlayerData()
+
+    return () => {
+      cancelled = true
+
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl)
+      }
+    }
+  }, [retryKey])
+
+  const validRecords =
+    climate?.records.filter(
+      (record) =>
+        record.temperature_celsius !== null &&
+        record.rainfall_mm !== null,
+    ) ?? []
+
+  const latestRecord = validRecords[validRecords.length - 1]
+
+  const firstTemperature = validRecords[0]?.temperature_celsius
+  const lastTemperature = latestRecord?.temperature_celsius
+
+  const eventType =
+    firstTemperature != null && lastTemperature != null
+      ? lastTemperature > firstTemperature
+        ? 'temperature_increase'
+        : lastTemperature < firstTemperature
+          ? 'temperature_decrease'
+          : 'stable'
+      : 'stable'
+
+  const formatTime = (seconds: number) => {
+    if (!Number.isFinite(seconds)) return '0:00'
+
+    const minutes = Math.floor(seconds / 60)
+    const remainingSeconds = Math.floor(seconds % 60)
+
+    return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
+  }
+
+  const latestDate = latestRecord
+    ? `${latestRecord.date.slice(0, 4)}-${latestRecord.date.slice(4, 6)}-${latestRecord.date.slice(6, 8)}`
+    : 'Waiting for data'
+
+  async function triggerHaptics() {
+    if (!vibration) return
+
+    if (typeof navigator === 'undefined') return
+
+    const vibrationNavigator = navigator as Navigator & {
+      vibrate?: (pattern: number | number[]) => boolean
+    }
+
+    if (typeof vibrationNavigator.vibrate !== 'function') {
+      setHapticMessage(
+        'This browser or device does not support vibration.',
+      )
+      return
+    }
+
+    try {
+      const result = await getHaptics(eventType)
+
+      const supported = vibrationNavigator.vibrate(
+        result.haptics.pattern_ms,
+      )
+
+      setHapticMessage(
+        supported
+          ? result.haptics.label
+          : 'Vibration is unavailable on this device.',
+      )
+    } catch {
+      setHapticMessage('Could not load the vibration pattern.')
+    }
+  }
+
+  async function handlePlay() {
+    if (!audioRef.current || !audioUrl || loading) return
+
+    try {
+      await audioRef.current.play()
+      triggerHaptics()
+    } catch {
+      setError('Audio could not start. Please try again.')
+    }
+  }
+
+  function handlePause() {
+    audioRef.current?.pause()
+  }
+
+  function handleStop() {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+    }
+
+    setPosition(0)
+    setPlaying(false)
+  }
+
+  function handleSpeedChange(value: string) {
+    setSpeed(value)
+
+    if (audioRef.current) {
+      audioRef.current.playbackRate = Number(value)
+    }
+  }
+
+  function handleSeek(value: number) {
+    setPosition(value)
+
+    if (audioRef.current && duration > 0) {
+      audioRef.current.currentTime = (value / 100) * duration
+    }
+  }
 
   return (
     <main className="content player-content" id="main-content">
       <div className="player-heading">
         <div>
-          <p className="eyebrow">Temperature Â· Global average</p>
-          <h1>Our warming world</h1>
+          <p className="eyebrow">NASA POWER · Delhi</p>
+          <h1>Our changing Earth</h1>
         </div>
+
         <div className="shortcut-hints">
           <kbd>Space</kbd> Play / pause <kbd>Esc</kbd> Stop
         </div>
       </div>
+
       {error && (
         <div className="error-banner" role="alert">
           <span>!</span>
+
           <div>
-            <strong>Live data stream interrupted</strong>
-            <p>Your current sound is paused. Saved data is still available.</p>
+            <strong>Player connection interrupted</strong>
+            <p>{error}</p>
           </div>
-          <Button variant="secondary" onClick={() => setError(false)}>
+
+          <Button
+            variant="secondary"
+            onClick={() => setRetryKey((value) => value + 1)}
+          >
             Retry connection
           </Button>
         </div>
       )}
+
       <div className="player-grid">
         <section className="visual-panel" aria-label="Earth data visualization">
           <div className="visual-image">
             <Image
               src={earthImage}
-              alt={
-                before
-                  ? 'Earth temperature visualization in 1993'
-                  : 'Earth temperature visualization in 2024'
-              }
+              alt="Illustrative view of Earth from space"
               fill
               sizes="(max-width: 1050px) 100vw, 55vw"
             />
+
             <div className="image-overlay">
-              <span className="date-badge">{before ? '1993' : '2024'}</span>
-              <span className="source-badge">NASA GISS</span>
+              <span className="date-badge">
+                {latestDate}
+              </span>
+
+              <span className="source-badge">
+                NASA POWER
+              </span>
             </div>
+
             <div className="caption-strip">
               <Icon name="learn" size={20} />
-              <span>Global temperatures are now 1.2Â°C above the 20th-century average.</span>
+
+              <span>
+                {latestRecord
+                  ? `Temperature: ${latestRecord.temperature_celsius?.toFixed(1)}°C · Rainfall: ${latestRecord.rainfall_mm?.toFixed(1)} mm`
+                  : loading
+                    ? 'Fetching climate readings...'
+                    : 'No climate readings available.'}
+              </span>
             </div>
           </div>
-          <div className="before-after" role="group" aria-label="Choose comparison year">
-            <button className={before ? 'active' : ''} onClick={() => setBefore(true)}>
-              Before <small>1993</small>
-            </button>
-            <button className={!before ? 'active' : ''} onClick={() => setBefore(false)}>
-              After <small>2024</small>
-            </button>
+
+          <div className="before-after">
+            <span>
+              <strong>Data period</strong>
+              <small>7 recent available daily readings</small>
+            </span>
+
+            <span>
+              <strong>Location</strong>
+              <small>Delhi, India</small>
+            </span>
           </div>
+
           <div className="map-strip">
             <div className="mini-map" aria-hidden="true">
               <Icon name="globe" size={52} />
             </div>
+
             <div>
-              <strong>Region: Global</strong>
-              <span>Use arrow keys to explore regions</span>
+              <strong>Region: Delhi</strong>
+              <span>NASA POWER daily climate data</span>
             </div>
-            <Button variant="ghost" onClick={() => setError(true)}>
-              Change region
-            </Button>
           </div>
         </section>
+
         <section className="sound-panel" aria-label="Sound controls">
+          <p style={{ color: 'white', fontSize: '12px' }}>
+  Audio URL: {audioUrl ? 'Loaded' : 'Missing'} |
+  Audio duration: {duration}
+</p>
+          <audio
+            ref={audioRef}
+            src={audioUrl ?? undefined}
+            preload="metadata"
+            onPlay={() => setPlaying(true)}
+            onPause={() => setPlaying(false)}
+            onEnded={() => {
+              setPlaying(false)
+              setPosition(0)
+            }}
+            onLoadedMetadata={(event) => {
+              setDuration(event.currentTarget.duration)
+            }}
+            onTimeUpdate={(event) => {
+              const audio = event.currentTarget
+
+              if (audio.duration > 0) {
+                setPosition(
+                  (audio.currentTime / audio.duration) * 100,
+                )
+              }
+            }}
+          />
+
           <div className="now-hearing">
             <div>
               <span className={playing ? 'pulse-dot' : 'pulse-dot paused'} />
-              <strong>{playing ? 'Now hearing' : 'Ready to play'}</strong>
+
+              <strong>
+                {loading
+                  ? 'Preparing Earth sounds'
+                  : playing
+                    ? 'Now hearing'
+                    : error
+                      ? 'Audio unavailable'
+                      : 'Ready to play'}
+              </strong>
             </div>
+
             <p aria-live="polite">
-              {playing ? 'Temperature rising, pitch is higher.' : 'Press play when you are ready.'}
+              {loading
+                ? 'Retrieving NASA readings and generating audio.'
+                : playing
+                  ? 'NASA climate readings are being converted into sound.'
+                  : 'Press play to hear the climate data.'}
             </p>
           </div>
-          <div className="sound-meters" aria-label="Current sound values">
-            {[
-              ['Pitch', 'High', 78],
-              ['Volume', 'Comfortable', 52],
-              ['Rhythm', '68 BPM', 64],
-            ].map(([label, text, value]) => (
-              <div className="meter" key={label as string}>
-                <span>
-                  <strong>{label}</strong>
-                  <em>{text}</em>
-                </span>
-                <div>
-                  <i style={{ width: `${value}%` }} />
-                </div>
-              </div>
-            ))}
+
+          <div className="sound-meters" aria-label="Climate readings">
+            <div className="meter">
+              <span>
+                <strong>Temperature</strong>
+                <em>
+                  {latestRecord?.temperature_celsius != null
+                    ? `${latestRecord.temperature_celsius.toFixed(1)}°C`
+                    : '—'}
+                </em>
+              </span>
+            </div>
+
+            <div className="meter">
+              <span>
+                <strong>Rainfall</strong>
+                <em>
+                  {latestRecord?.rainfall_mm != null
+                    ? `${latestRecord.rainfall_mm.toFixed(1)} mm`
+                    : '—'}
+                </em>
+              </span>
+            </div>
           </div>
+
           <label className="timeline">
             <span>
-              <strong>Timeline</strong>
-              <output>{1993 + Math.round(position * 0.31)}</output>
+              <strong>Audio timeline</strong>
+              <output>
+                {formatTime(
+                  audioRef.current?.currentTime ?? 0,
+                )} / {formatTime(duration)}
+              </output>
             </span>
+
             <input
               type="range"
               min="0"
               max="100"
+              step="0.1"
               value={position}
-              onChange={(e) => setPosition(Number(e.target.value))}
+              onChange={(event) =>
+                handleSeek(Number(event.target.value))
+              }
+              disabled={!audioUrl || loading}
+              aria-label="Audio playback position"
             />
+
             <small>
-              <span>1993</span>
-              <span>2024</span>
+              <span>Start</span>
+              <span>End</span>
             </small>
           </label>
+
           <div className="transport">
             <button
               className="play-button"
-              onClick={() => setPlaying(!playing)}
+              onClick={playing ? handlePause : handlePlay}
               aria-label={playing ? 'Pause sound' : 'Play sound'}
+              disabled={!audioUrl || loading}
             >
-              <Icon name={playing ? 'pause' : 'play'} size={34} />
+              <Icon
+                name={playing ? 'pause' : 'play'}
+                size={34}
+              />
             </button>
+
             <label>
               Speed
-              <select value={speed} onChange={(e) => setSpeed(e.target.value)}>
-                <option>0.5Ã—</option>
-                <option>0.75Ã—</option>
-                <option>1Ã—</option>
-                <option>1.5Ã—</option>
-                <option>2Ã—</option>
+
+              <select
+                value={speed}
+                onChange={(event) =>
+                  handleSpeedChange(event.target.value)
+                }
+              >
+                <option value="0.5">0.5×</option>
+                <option value="0.75">0.75×</option>
+                <option value="1">1×</option>
+                <option value="1.5">1.5×</option>
+                <option value="2">2×</option>
               </select>
             </label>
+
             <button className="mic-shortcut" onClick={goVoice}>
               <Icon name="mic" />
               <span>Adjust by voice</span>
             </button>
           </div>
+
           <Toggle
             checked={vibration}
             onChange={setVibration}
             label="Vibration patterns"
-            hint="Feel temperature change"
+            hint="Feel changes in the temperature readings"
           />
+
+          {hapticMessage && (
+            <p role="status" className="eyebrow">
+              {hapticMessage}
+            </p>
+          )}
+
           <Button
             variant="danger"
             icon="stop"
             className="stop-button"
-            onClick={() => setPlaying(false)}
+            onClick={handleStop}
           >
             Stop sound
           </Button>
