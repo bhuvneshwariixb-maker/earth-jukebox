@@ -960,6 +960,41 @@ function Home({
   dismissInstall: () => void
 }) {
   const [previewing, setPreviewing] = useState<string | null>(null)
+
+const previewAudioRef = useRef<HTMLAudioElement | null>(null)
+
+const togglePreview = async (datasetId: string) => {if (datasetId !== 'temperature' && datasetId !== 'rain') {
+  return
+}
+  if (previewing === datasetId) {
+    previewAudioRef.current?.pause()
+    previewAudioRef.current = null
+    setPreviewing(null)
+    return
+  }
+
+  previewAudioRef.current?.pause()
+
+ const startDate = datasetId === 'rain' ? '2025-07-01' : '2025-01-01'
+const endDate = datasetId === 'rain' ? '2025-07-10' : '2025-01-05'
+
+const audio = new Audio(
+  `/api/nasa/sonify/audio?latitude=28.6139&longitude=77.2090&start_date=${startDate}&end_date=${endDate}&dataset=${datasetId}`
+)
+
+  previewAudioRef.current = audio
+  setPreviewing(datasetId)
+
+  audio.onended = () => setPreviewing(null)
+  audio.onerror = () => setPreviewing(null)
+
+  try {
+    await audio.play()
+  } catch (error) {
+    console.error('Preview playback failed:', error)
+    setPreviewing(null)
+  }
+}
   return (
     <main className="content" id="main-content">
       <div className="page-heading">
@@ -1011,14 +1046,20 @@ function Home({
               <h3>{dataset.name}</h3>
               <p>{dataset.description}</p>
               <div className="dataset-actions">
-                <Button
-                  variant="ghost"
-                  icon={previewing === dataset.id ? 'pause' : 'volume'}
-                  onClick={() => setPreviewing(previewing === dataset.id ? null : dataset.id)}
-                  aria-pressed={previewing === dataset.id}
-                >
-                  {previewing === dataset.id ? 'Stop preview' : 'Preview sound'}
-                </Button>
+                {dataset.id === 'temperature' || dataset.id === 'rain' ? (
+                  <Button
+                    variant="ghost"
+                    icon={previewing === dataset.id ? 'pause' : 'volume'}
+                    onClick={() => void togglePreview(dataset.id)}
+                    aria-pressed={previewing === dataset.id}
+                  >
+                    {previewing === dataset.id ? 'Stop preview' : 'Preview sound'}
+                  </Button>
+                ) : (
+                  <span className="text-sm text-gray-500">
+                    Real data coming soon
+                  </span>
+                )}
                 <button
                   className="round-arrow"
                   onClick={() => setScreen('player')}
@@ -1722,4 +1763,3 @@ export default function EarthJukebox({ initialUser }: { initialUser: AppUser | n
     </div>
   )
 }
-

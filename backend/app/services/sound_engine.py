@@ -56,7 +56,7 @@ def generate_wav(sound_records):
                 )
 
             # Generate a sine wave
-            amplitude = 0.25 * envelope
+            amplitude = float(record.get("amplitude",0.25))*envelope
 
             sample = amplitude * math.sin(
                 2 * math.pi * frequency * i / sample_rate

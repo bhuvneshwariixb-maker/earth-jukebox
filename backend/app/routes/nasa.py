@@ -21,7 +21,8 @@ def climate_data(
     latitude: float = Query(..., ge=-90, le=90),
     longitude: float = Query(..., ge=-180, le=180),
     start_date: date = Query(...),
-    end_date: date = Query(...)
+    end_date: date = Query(...),
+dataset: str = Query("temperature")
 ):
     try:
         data = get_climate_data(
@@ -59,7 +60,8 @@ def sonify_climate(
     latitude: float = Query(..., ge=-90, le=90),
     longitude: float = Query(..., ge=-180, le=180),
     start_date: date = Query(...),
-    end_date: date = Query(...)
+    end_date: date = Query(...),
+    dataset: str = Query("temperature")
 ):
     try:
         climate_data = get_climate_data(
@@ -70,9 +72,9 @@ def sonify_climate(
         )
 
         sound_data = convert_climate_to_sound(
-            climate_data["records"]
-        )
-
+    climate_data["records"],
+    dataset=dataset
+)
         return {
             "location": {
                 "latitude": latitude,
@@ -91,12 +93,14 @@ def sonify_climate(
             detail="Unable to retrieve NASA data."
         )
 
+
 @router.get("/sonify/audio")
 def generate_climate_audio(
     latitude: float = Query(..., ge=-90, le=90),
     longitude: float = Query(..., ge=-180, le=180),
     start_date: date = Query(...),
-    end_date: date = Query(...)
+    end_date: date = Query(...),
+    dataset: str = Query("temperature")
 ):
     try:
         climate_data = get_climate_data(
@@ -107,7 +111,8 @@ def generate_climate_audio(
         )
 
         sound_data = convert_climate_to_sound(
-            climate_data["records"]
+            climate_data["records"],
+            dataset=dataset
         )
 
         audio_bytes = generate_wav(
@@ -134,6 +139,7 @@ def generate_climate_audio(
             status_code=502,
             detail="Unable to retrieve NASA data."
         )
+
 @router.get("/haptics")
 def get_haptics(
     event_type: str = Query(...)
