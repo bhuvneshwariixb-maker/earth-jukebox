@@ -1,8 +1,11 @@
 
-from app.services.vibration_service import get_vibration_pattern
+from app.services.sonification_service import (
+    convert_climate_to_sound,
+    convert_sea_ice_to_sound
+)
 from io import BytesIO
 from fastapi.responses import StreamingResponse
-
+from app.services.sea_ice_service import get_sea_ice_data
 from app.services.sound_engine import generate_wav
 import requests
 from datetime import date
@@ -155,4 +158,113 @@ def get_haptics(
             status_code=400,
             detail=str(error)
         )
+@router.get("/sea-ice")
+def sea_ice_data(
+    hemisphere: str = Query("north"),
+    start_date: date = Query(...),
+    end_date: date = Query(...)
+):
+    try:
+        data = get_sea_ice_data(
+            hemisphere=hemisphere,
+            start_date=start_date,
+            end_date=end_date
+        )
 
+        return data
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
+
+    except requests.RequestException:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to retrieve Sea Ice data from NSIDC."
+        )
+
+@router.get("/sea-ice/sonify")
+def sonify_sea_ice(
+    hemisphere: str = Query("north"),
+    start_date: date = Query(...),
+    end_date: date = Query(...)
+):
+    try:
+        sea_ice_data = get_sea_ice_data(
+            hemisphere=hemisphere,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        sound_data = convert_sea_ice_to_sound(
+            sea_ice_data["records"]
+        )
+
+        return {
+            "source": sea_ice_data["source"],
+            "hemisphere": hemisphere,
+            "sonification": sound_data
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
+
+    except requests.RequestException:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to retrieve Sea Ice data from NSIDC."
+        )
+
+
+@router.get("/sea-ice/sonify/audio")
+def generate_sea_ice_audio(
+    hemisphere: str = Query("north"),
+    start_date: date = Query(...),
+    end_date: date = Query(...)
+):
+    try:
+        sea_ice_data = get_sea_ice_data(
+            hemisphere=hemisphere,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        sound_data = convert_sea_ice_to_sound(
+            sea_ice_data["records"]
+        )
+
+        if not sound_data["sound_records"]:
+            raise HTTPException(
+                status_code=404,
+                detail="No Sea Ice records available for these dates."
+            )
+
+        audio_bytes = generate_wav(
+            sound_data["sound_records"]
+        )
+
+        return StreamingResponse(
+            BytesIO(audio_bytes),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition":
+                    'attachment; filename="earth_jukebox_sea_ice.wav"'
+            }
+        )
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
+
+    except requests.RequestException:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to retrieve Sea Ice data from NSIDC."
+        )
