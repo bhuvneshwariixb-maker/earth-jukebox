@@ -18,6 +18,7 @@ const makePublicPreviewOrigin = (() => {
   }
 })()
 
+const backendURL = process.env.BACKEND_URL || 'http://127.0.0.1:8000'
 const nextConfig: NextConfig = {
   webpack: (webpackConfig) => {
     webpackConfig.resolve.extensionAlias = {
@@ -59,19 +60,20 @@ const nextConfig: NextConfig = {
       allowedOrigins: makePublicPreviewOrigin ? [makePublicPreviewOrigin] : [],
     },
   },
+  
   async rewrites() {
     return [
       {
         source: '/api/nasa/:path*',
-        destination: 'http://127.0.0.1:8000/api/nasa/:path*',
+        destination: `${backendURL}/api/nasa/:path*`,
       },
       {
         source: '/api/gemini/:path*',
-        destination: 'http://127.0.0.1:8000/api/gemini/:path*',
+        destination: `${backendURL}/api/gemini/:path*`,
       },
     ]
   },
-  env: {
+    env: {
     NEXT_PUBLIC_SITE_URL: process.env.FIGMA_PUBLIC_URL || 'http://localhost:3000',
     // NOTE: Do not add FIGMA_OAUTH_CLIENT_SECRET, FIGMA_CONTENT_API_ACCESS_KEY,
     // or any other credential here. Values placed in `env` are inlined into
