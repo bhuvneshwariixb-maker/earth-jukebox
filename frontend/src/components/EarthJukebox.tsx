@@ -8,7 +8,10 @@ import {
   getClimateAudio,
   getClimateData,
   getHaptics,
+  getSeaIceData,
+  getSeaIceAudio,
   type ClimateResponse,
+  type SeaIceResponse,
 } from '@/lib/earth-jukebox-api'
 import { useGeminiLive } from '@/lib/useGeminiLive'
 
@@ -831,45 +834,166 @@ function AccountSetup({
   )
 }
 
+
 function Onboarding({ onComplete, onBack }: { onComplete: () => void; onBack: () => void }) {
   const [step, setStep] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const [volume, setVolume] = useState(35)
+  const [audioError, setAudioError] = useState<string | null>(null)
   const [mode, setMode] = useState('Both')
   const [voice, setVoice] = useState('Warm and clear')
   const [speed, setSpeed] = useState(0.9)
+
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const oscillatorRef = useRef<OscillatorNode | null>(null)
+  const gainNodeRef = useRef<GainNode | null>(null)
+
   const titles = [
-    'Letâ€™s check your sound',
+    "Let's check your sound",
     'How would you like to experience data?',
     'Choose your narration',
   ]
+
+  function stopTone() {
+    try {
+      oscillatorRef.current?.stop()
+    } catch {
+      // The oscillator may already have stopped.
+    }
+
+    oscillatorRef.current?.disconnect()
+    oscillatorRef.current = null
+    gainNodeRef.current = null
+
+    const context = audioContextRef.current
+    audioContextRef.current = null
+
+    if (context && context.state !== 'closed') {
+      void context.close()
+    }
+
+    setPlaying(false)
+  }
+
+  async function toggleTone() {
+    if (playing) {
+      stopTone()
+      return
+    }
+
+    try {
+      setAudioError(null)
+
+      const context = new AudioContext()
+      audioContextRef.current = context
+
+      await context.resume()
+
+      const oscillator = context.createOscillator()
+      const gain = context.createGain()
+
+      oscillator.type = 'sine'
+      oscillator.frequency.value = 261.63
+
+      const targetVolume = (volume / 100) * 0.15
+
+      gain.gain.setValueAtTime(0, context.currentTime)
+      gain.gain.linearRampToValueAtTime(
+        targetVolume,
+        context.currentTime + 0.15,
+      )
+
+      oscillator.connect(gain)
+      gain.connect(context.destination)
+
+      oscillator.start()
+
+      oscillatorRef.current = oscillator
+      gainNodeRef.current = gain
+
+      setPlaying(true)
+    } catch (error) {
+      console.error('Comfort sound playback failed:', error)
+      stopTone()
+      setAudioError('Audio could not start. Check your browser sound settings and try again.')
+    }
+  }
+
+  function changeVolume(nextVolume: number) {
+    setVolume(nextVolume)
+
+    const context = audioContextRef.current
+    const gain = gainNodeRef.current
+
+    if (context && gain) {
+      gain.gain.setTargetAtTime(
+        (nextVolume / 100) * 0.15,
+        context.currentTime,
+        0.03,
+      )
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      const oscillator = oscillatorRef.current
+      const context = audioContextRef.current
+
+      try {
+        oscillator?.stop()
+      } catch {
+        // Already stopped.
+      }
+
+      oscillator?.disconnect()
+
+      if (context && context.state !== 'closed') {
+        void context.close()
+      }
+
+      oscillatorRef.current = null
+      gainNodeRef.current = null
+      audioContextRef.current = null
+    }
+  }, [])
+
   return (
     <main className="onboarding-page" id="main-content">
       <div className="onboarding-header">
         <button className="icon-button" onClick={onBack} aria-label="Back">
           <Icon name="back" />
         </button>
+
         <div className="step-progress" aria-label={`Step ${step + 1} of 3`}>
           {[0, 1, 2].map((item) => (
             <span key={item} className={item <= step ? 'active' : ''} />
           ))}
         </div>
+
         <span>Step {step + 1} of 3</span>
       </div>
+
       <section className="onboarding-card">
         <div className="step-icon">
-          <Icon name={step === 0 ? 'volume' : step === 1 ? 'vibration' : 'mic'} size={38} />
+          <Icon
+            name={step === 0 ? 'volume' : step === 1 ? 'vibration' : 'mic'}
+            size={38}
+          />
         </div>
+
         <p className="eyebrow">Comfort setup</p>
         <h1>{titles[step]}</h1>
+
         {step === 0 && (
           <>
             <p>
-              Play a gentle tone, then set it to a comfortable level. It will never start
-              automatically.
+              Play a gentle tone, then set it to a comfortable level.
+              It will never start automatically.
             </p>
+
             <button
               className={`sound-test ${playing ? 'playing' : ''}`}
-              onClick={() => setPlaying(!playing)}
+              onClick={toggleTone}
               aria-pressed={playing}
             >
               <span className="wave-bars" aria-hidden="true">
@@ -877,19 +1001,37 @@ function Onboarding({ onComplete, onBack }: { onComplete: () => void; onBack: ()
                   <i key={n} />
                 ))}
               </span>
-              <strong>{playing ? 'Pause gentle tone' : 'Play gentle tone'}</strong>
-              <span>{playing ? 'A soft, steady C note is playing' : 'Nothing is playing'}</span>
+
+              <strong>
+                {playing ? 'Stop gentle tone' : 'Play gentle tone'}
+              </strong>
+
+              <span>
+                {playing ? 'A soft, steady C note is playing' : 'Nothing is playing'}
+              </span>
             </button>
-            <RangeControl label="Test volume" value={35} onChange={() => {}} />
+
+            {audioError && (
+              <p className="form-error" role="alert">
+                {audioError}
+              </p>
+            )}
+
+            <RangeControl
+              label="Test volume"
+              value={volume}
+              onChange={changeVolume}
+            />
           </>
         )}
+
         {step === 1 && (
           <div className="choice-grid" role="radiogroup" aria-label="Output preference">
             {[
               ['Audio', 'volume', 'Hear musical data'],
               ['Vibration', 'vibration', 'Feel patterns'],
               ['Both', 'waves', 'Hear and feel together'],
-            ].map(([label, icon, text]) => (
+            ].map(([label, icon, description]) => (
               <button
                 key={label}
                 role="radio"
@@ -899,7 +1041,8 @@ function Onboarding({ onComplete, onBack }: { onComplete: () => void; onBack: ()
               >
                 <Icon name={icon} size={30} />
                 <strong>{label}</strong>
-                <span>{text}</span>
+                <span>{description}</span>
+
                 {mode === label && (
                   <span className="choice-check">
                     <Icon name="check" size={18} />
@@ -909,6 +1052,7 @@ function Onboarding({ onComplete, onBack }: { onComplete: () => void; onBack: ()
             ))}
           </div>
         )}
+
         {step === 2 && (
           <>
             <div className="voice-options" role="radiogroup" aria-label="Narration voice">
@@ -928,33 +1072,47 @@ function Onboarding({ onComplete, onBack }: { onComplete: () => void; onBack: ()
                 </button>
               ))}
             </div>
+
             <label className="select-label">
               Narration speed
               <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
-                <option value={0.75}>Slower â€” 0.75Ã—</option>
-                <option value={0.9}>Gentle â€” 0.9Ã—</option>
-                <option value={1}>Standard â€” 1Ã—</option>
-                <option value={1.25}>Faster â€” 1.25Ã—</option>
+                <option value={0.75}>Slower — 0.75×</option>
+                <option value={0.9}>Gentle — 0.9×</option>
+                <option value={1}>Standard — 1×</option>
+                <option value={1.25}>Faster — 1.25×</option>
               </select>
             </label>
           </>
         )}
+
         <div className="onboarding-actions">
           {step > 0 && (
             <Button variant="ghost" onClick={() => setStep(step - 1)}>
               Back
             </Button>
           )}
-          <Button onClick={() => (step < 2 ? setStep(step + 1) : onComplete())}>
+
+          <Button
+            onClick={() => {
+              if (step < 2) {
+                setStep(step + 1)
+              } else {
+                stopTone()
+                onComplete()
+              }
+            }}
+          >
             {step < 2 ? 'Continue' : 'Finish setup'} <Icon name="arrow" size={20} />
           </Button>
         </div>
       </section>
-      <p className="setup-note">You can change any of these choices later in Comfort settings.</p>
+
+      <p className="setup-note">
+        You can change any of these choices later in Comfort settings.
+      </p>
     </main>
   )
 }
-
 function Home({
   setScreen,
   showInstall,
@@ -1235,12 +1393,21 @@ function Player({ goVoice }: { goVoice: () => void }) {
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const [playing, setPlaying] = useState(false)
+  const [volume, setVolume] = useState(35)
   const [vibration, setVibration] = useState(true)
   const [position, setPosition] = useState(0)
   const [duration, setDuration] = useState(0)
   const [speed, setSpeed] = useState('1')
   const [climate, setClimate] = useState<ClimateResponse | null>(null)
+  const [seaIce, setSeaIce] = useState<SeaIceResponse | null>(null)
+  const [dataset, setDataset] = useState<'temperature' | 'rain' | 'sea_ice'>('temperature')
+  const [hemisphere, setHemisphere] = useState<'north' | 'south'>('north')
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
+useEffect(() => {
+  if (audioRef.current) {
+    audioRef.current.volume = volume / 100
+  }
+}, [volume, audioUrl])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [hapticMessage, setHapticMessage] = useState('')
@@ -1248,18 +1415,26 @@ function Player({ goVoice }: { goVoice: () => void }) {
   const [retryKey, setRetryKey] = useState(0)
 
   useEffect(() => {
-    let cancelled = false
-    let createdUrl: string | null = null
+  let cancelled = false
+  let createdUrl: string | null = null
 
-    async function loadPlayerData() {
-      try {
-        setLoading(true)
-        setError(null)
-        setPlaying(false)
+  async function loadPlayerData() {
+    try {
+      setLoading(true)
+      setError(null)
+      setPlaying(false)
+      audioRef.current?.pause()
+      setPosition(0)
+      setDuration(0)
+      setAudioUrl(null)
+      setClimate(null)
+      setSeaIce(null)
 
-        const today = new Date()
-        const end = new Date(today)
-        end.setDate(today.getDate() - 2)
+      let audioBlob: Blob
+
+      if (dataset === 'sea_ice') {
+        const end = new Date()
+        end.setDate(end.getDate() - 2)
 
         const start = new Date(end)
         start.setDate(end.getDate() - 6)
@@ -1271,6 +1446,33 @@ function Player({ goVoice }: { goVoice: () => void }) {
           return `${year}-${month}-${day}`
         }
 
+        const startDate = formatDate(start)
+        const endDate = formatDate(end)
+
+        const [seaIceResult, blob] = await Promise.all([
+          getSeaIceData(hemisphere, startDate, endDate),
+          getSeaIceAudio(hemisphere, startDate, endDate),
+        ])
+
+        if (cancelled) return
+
+        setSeaIce(seaIceResult)
+        audioBlob = blob
+      } else {
+        const today = new Date()
+        const end = new Date(today)
+        end.setDate(today.getDate() - 2)
+
+        const start = new Date(end)
+        start.setDate(end.getDate() - 6)
+
+        const formatDate = (date: Date) => {
+          const year = date.getFullYear()
+          const month = String(date.getMonth() + 1).padStart(2, '0')
+          const day = String(date.getDate()).padStart(2, '0')
+          return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+        }
+
         const params = {
           latitude: 28.6139,
           longitude: 77.209,
@@ -1278,41 +1480,48 @@ function Player({ goVoice }: { goVoice: () => void }) {
           endDate: formatDate(end),
         }
 
-        const [climateResult, audioBlob] = await Promise.all([
+        const [climateResult, blob] = await Promise.all([
           getClimateData(params),
           getClimateAudio(params),
         ])
 
         if (cancelled) return
 
-        createdUrl = URL.createObjectURL(audioBlob)
-
         setClimate(climateResult)
-        setAudioUrl(createdUrl)
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : 'Unable to load Earth data or generate audio.',
-          )
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
+        audioBlob = blob
       }
-    }
 
-    loadPlayerData()
+      if (cancelled) return
 
-    return () => {
-      cancelled = true
-
-      if (createdUrl) {
-        URL.revokeObjectURL(createdUrl)
+      createdUrl = URL.createObjectURL(audioBlob)
+      setAudioUrl(createdUrl)
+    } catch (err) {
+      if (!cancelled) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Unable to load Earth data or generate audio.',
+        )
       }
+    } finally {
+      if (!cancelled) setLoading(false)
     }
-  }, [retryKey])
+  }
 
+  loadPlayerData()
+
+  return () => {
+    cancelled = true
+
+    if (createdUrl) {
+      URL.revokeObjectURL(createdUrl)
+    }
+  }
+}, [retryKey, dataset, hemisphere])
+  const latestSeaIceRecord =
+  seaIce?.records?.[seaIce.records.length - 1]
+
+const latestSeaIceDate = latestSeaIceRecord?.date ?? 'Waiting for data'
   const validRecords =
     climate?.records.filter(
       (record) =>
@@ -1342,10 +1551,12 @@ function Player({ goVoice }: { goVoice: () => void }) {
 
     return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
   }
-
-  const latestDate = latestRecord
-    ? `${latestRecord.date.slice(0, 4)}-${latestRecord.date.slice(4, 6)}-${latestRecord.date.slice(6, 8)}`
-    : 'Waiting for data'
+  const latestDate =
+  dataset === 'sea_ice'
+    ? latestSeaIceDate
+    : latestRecord
+      ? `${latestRecord.date.slice(0, 4)}-${latestRecord.date.slice(4, 6)}-${latestRecord.date.slice(6, 8)}`
+      : 'Waiting for data'
 
   async function triggerHaptics() {
     if (!vibration) return
@@ -1423,9 +1634,43 @@ function Player({ goVoice }: { goVoice: () => void }) {
 
   return (
     <main className="content player-content" id="main-content">
+      <div className="dataset-controls">
+  <label>
+    Dataset
+    <select
+      value={dataset}
+      onChange={(event) =>
+        setDataset(event.target.value as 'temperature' | 'rain' | 'sea_ice')
+      }
+    >
+      <option value="temperature">Temperature</option>
+      <option value="rain">Rainfall</option>
+      <option value="sea_ice">Sea Ice</option>
+    </select>
+  </label>
+
+  {dataset === 'sea_ice' && (
+    <label>
+      Hemisphere
+      <select
+        value={hemisphere}
+        onChange={(event) =>
+          setHemisphere(event.target.value as 'north' | 'south')
+        }
+      >
+        <option value="north">Northern</option>
+        <option value="south">Southern</option>
+      </select>
+    </label>
+  )}
+</div>
       <div className="player-heading">
         <div>
-          <p className="eyebrow">NASA POWER · Delhi</p>
+         <p className="eyebrow">
+  {dataset === 'sea_ice'
+    ? `NSIDC SEA ICE · ${hemisphere.toUpperCase()}`
+    : 'NASA POWER · Delhi'}
+</p> 
           <h1>Our changing Earth</h1>
         </div>
 
@@ -1463,128 +1708,53 @@ function Player({ goVoice }: { goVoice: () => void }) {
             />
 
             <div className="image-overlay">
-              <span className="date-badge">
-                {latestDate}
-              </span>
-
+              <span className="date-badge">{latestDate}</span>
               <span className="source-badge">
-                NASA POWER
+                {dataset === 'sea_ice' ? 'NSIDC Sea Ice Index' : 'NASA POWER'}
               </span>
             </div>
 
-            <div className="caption-strip">
-              <Icon name="learn" size={20} />
-
-              <span>
-                {latestRecord
+            <Icon name="learn" size={20} />
+            <span>
+              {dataset === 'sea_ice'
+                ? latestSeaIceRecord
+                  ? `Sea Ice Extent: ${latestSeaIceRecord.extent_million_sq_km.toFixed(3)} million km²`
+                  : loading
+                    ? 'Fetching Sea Ice readings...'
+                    : 'No Sea Ice readings available.'
+                : latestRecord
                   ? `Temperature: ${latestRecord.temperature_celsius?.toFixed(1)}°C · Rainfall: ${latestRecord.rainfall_mm?.toFixed(1)} mm`
                   : loading
                     ? 'Fetching climate readings...'
                     : 'No climate readings available.'}
-              </span>
-            </div>
-          </div>
-
-          <div className="before-after">
-            <span>
-              <strong>Data period</strong>
-              <small>7 recent available daily readings</small>
-            </span>
-
-            <span>
-              <strong>Location</strong>
-              <small>Delhi, India</small>
             </span>
           </div>
 
-          <div className="map-strip">
-            <div className="mini-map" aria-hidden="true">
-              <Icon name="globe" size={52} />
-            </div>
-
-            <div>
-              <strong>Region: Delhi</strong>
-              <span>NASA POWER daily climate data</span>
-            </div>
-          </div>
-        </section>
-
-        <section className="sound-panel" aria-label="Sound controls">
-          <p style={{ color: 'white', fontSize: '12px' }}>
-  Audio URL: {audioUrl ? 'Loaded' : 'Missing'} |
-  Audio duration: {duration}
-</p>
           <audio
             ref={audioRef}
             src={audioUrl ?? undefined}
             preload="metadata"
+            onLoadedMetadata={(event) => {
+              setDuration(event.currentTarget.duration || 0)
+              event.currentTarget.volume = volume / 100
+              event.currentTarget.playbackRate = Number(speed)
+            }}
+            onTimeUpdate={(event) => {
+              const audio = event.currentTarget
+              setPosition(audio.duration > 0 ? (audio.currentTime / audio.duration) * 100 : 0)
+            }}
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onEnded={() => {
               setPlaying(false)
               setPosition(0)
             }}
-            onLoadedMetadata={(event) => {
-              setDuration(event.currentTarget.duration)
-            }}
-            onTimeUpdate={(event) => {
-              const audio = event.currentTarget
-
-              if (audio.duration > 0) {
-                setPosition(
-                  (audio.currentTime / audio.duration) * 100,
-                )
-              }
+            onError={() => {
+              if (audioUrl && !loading) setError('The generated audio could not be loaded. Please retry.')
             }}
           />
 
-          <div className="now-hearing">
-            <div>
-              <span className={playing ? 'pulse-dot' : 'pulse-dot paused'} />
-
-              <strong>
-                {loading
-                  ? 'Preparing Earth sounds'
-                  : playing
-                    ? 'Now hearing'
-                    : error
-                      ? 'Audio unavailable'
-                      : 'Ready to play'}
-              </strong>
-            </div>
-
-            <p aria-live="polite">
-              {loading
-                ? 'Retrieving NASA readings and generating audio.'
-                : playing
-                  ? 'NASA climate readings are being converted into sound.'
-                  : 'Press play to hear the climate data.'}
-            </p>
-          </div>
-
-          <div className="sound-meters" aria-label="Climate readings">
-            <div className="meter">
-              <span>
-                <strong>Temperature</strong>
-                <em>
-                  {latestRecord?.temperature_celsius != null
-                    ? `${latestRecord.temperature_celsius.toFixed(1)}°C`
-                    : '—'}
-                </em>
-              </span>
-            </div>
-
-            <div className="meter">
-              <span>
-                <strong>Rainfall</strong>
-                <em>
-                  {latestRecord?.rainfall_mm != null
-                    ? `${latestRecord.rainfall_mm.toFixed(1)} mm`
-                    : '—'}
-                </em>
-              </span>
-            </div>
-          </div>
+          <RangeControl label="Volume" value={volume} onChange={setVolume} />
 
           <label className="timeline">
             <span>
@@ -1655,7 +1825,7 @@ function Player({ goVoice }: { goVoice: () => void }) {
             checked={vibration}
             onChange={setVibration}
             label="Vibration patterns"
-            hint="Feel changes in the temperature readings"
+            hint={dataset === 'sea_ice' ? 'Feel changes in sea ice data' : 'Feel changes in the climate readings'}
           />
 
           {hapticMessage && (

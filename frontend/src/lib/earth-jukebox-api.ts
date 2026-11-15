@@ -45,6 +45,37 @@ export type HapticsResponse = {
     unit: string
   }
 }
+export type SeaIceRecord = {
+  date: string
+  extent_million_sq_km: number
+  missing_million_sq_km: number
+}
+
+export type SeaIceResponse = {
+  source: string
+  hemisphere: string
+  unit: string
+  records: SeaIceRecord[]
+}
+
+export type SeaIceSoundRecord = {
+  date: string
+  frequency_hz: number
+  duration_seconds: number
+  amplitude: number
+  extent_million_sq_km: number
+  daily_change_million_sq_km: number
+}
+
+export type SeaIceSonificationResponse = {
+  source: string
+  hemisphere: string
+  sonification: {
+    sonification_method: string
+    dataset: string
+    sound_records: SeaIceSoundRecord[]
+  }
+}
 
 type ClimateQuery = {
   latitude: number
@@ -138,4 +169,45 @@ export async function getHaptics(
   )
 
   return readResponse<HapticsResponse>(response)
+}
+export async function getSeaIceData(
+  hemisphere: 'north' | 'south',
+  startDate: string,
+  endDate: string,
+): Promise<SeaIceResponse> {
+  const query = new URLSearchParams({
+    hemisphere,
+    start_date: startDate,
+    end_date: endDate,
+  })
+
+  const response = await fetch(
+    `/api/nasa/sea-ice?${query.toString()}`,
+    { cache: 'no-store' },
+  )
+
+  return readResponse<SeaIceResponse>(response)
+}
+
+export async function getSeaIceAudio(
+  hemisphere: 'north' | 'south',
+  startDate: string,
+  endDate: string,
+): Promise<Blob> {
+  const query = new URLSearchParams({
+    hemisphere,
+    start_date: startDate,
+    end_date: endDate,
+  })
+
+  const response = await fetch(
+    `/api/nasa/sea-ice/sonify/audio?${query.toString()}`,
+    { cache: 'no-store' },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Sea Ice audio request failed (${response.status})`)
+  }
+
+  return response.blob()
 }
